@@ -1,0 +1,17 @@
+{
+  "name": "lanchonete-bot",
+  "version": "1.0.0",
+  "description": "Agente de atendimento de lanchonete via WhatsApp com Gemini",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@supabase/supabase-js": "^2.46.0"
+  },
+  "devDependencies": {
+    "vercel": "^39.0.0"
+  }
+}
