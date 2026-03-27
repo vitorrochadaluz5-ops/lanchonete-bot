@@ -123,7 +123,7 @@ async function saveOrder(phone, message, response) {
 // =============================================================
 async function callGemini(history, userMessage) {
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash", // modelo mais barato — grátis até certo limite
+    model: "gemini-2.0-flash", // modelo mais barato — grátis até certo limite
     systemInstruction: buildSystemPrompt(),
     generationConfig: {
       maxOutputTokens: 500, // limita resposta para economizar tokens
