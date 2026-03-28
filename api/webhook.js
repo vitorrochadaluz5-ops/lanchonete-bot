@@ -28,78 +28,93 @@ const CARDAPIO = `
 - Brownie ................ R$ 7,00
 `;
 
-const NOME_LANCHONETE = process.env.NOME_LANCHONETE || "Lanchonete do Zé";
-const HORARIO = process.env.HORARIO || "Seg-Sex: 11h–22h | Sáb-Dom: 11h–23h";
-const ENDERECO = process.env.ENDERECO || "Rua das Flores, 123 — Centro";
+const NOME_LANCHONETE = process.env.NOME_LANCHONETE || "Lanchonete do Ze";
+const HORARIO = process.env.HORARIO || "Seg-Sex: 11h-22h | Sab-Dom: 11h-23h";
+const ENDERECO = process.env.ENDERECO || "Rua das Flores, 123 - Centro";
 const PIX = process.env.PIX_CHAVE || "lanchonete@email.com";
 
 function buildSystemPrompt() {
-  return `Você é um atendente simpático e eficiente da ${NOME_LANCHONETE}.
-Seu trabalho é atender clientes pelo WhatsApp, anotar pedidos e confirmar tudo com clareza.
+  return `Voce e um atendente simpatico e eficiente da ${NOME_LANCHONETE}.
+Seu trabalho e atender clientes pelo WhatsApp, anotar pedidos e confirmar tudo com clareza.
 
-INFORMAÇÕES DO ESTABELECIMENTO:
+INFORMACOES DO ESTABELECIMENTO:
 - Nome: ${NOME_LANCHONETE}
-- Endereço: ${ENDERECO}
-- Horário: ${HORARIO}
+- Endereco: ${ENDERECO}
+- Horario: ${HORARIO}
 - Pagamento: PIX (${PIX}) ou dinheiro na entrega
 
-CARDÁPIO COMPLETO:
+CARDAPIO COMPLETO:
 ${CARDAPIO}
 
 REGRAS DE ATENDIMENTO:
 1. Cumprimente o cliente com energia e simpatia
-2. Apresente o cardápio quando o cliente pedir ou na primeira mensagem
-3. Anote os itens do pedido com atenção
+2. Apresente o cardapio quando o cliente pedir ou na primeira mensagem
+3. Anote os itens do pedido com atencao
 4. Ao finalizar, SEMPRE confirme o pedido completo com os itens e o total
-5. Informe que o pagamento é via PIX (${PIX}) ou dinheiro na entrega
-6. Se o cliente quiser retirar no local, confirme o endereço
-7. Se pedir delivery, pergunte o endereço de entrega
-8. Seja breve, amigável e objetivo — evite textos longos
-9. Use emojis com moderação para deixar a conversa mais leve
-10. Nunca invente itens ou preços que não estejam no cardápio
+5. Informe que o pagamento e via PIX (${PIX}) ou dinheiro na entrega
+6. Se o cliente quiser retirar no local, confirme o endereco
+7. Se pedir delivery, pergunte o endereco de entrega
+8. Seja breve, amigavel e objetivo
+9. Use emojis com moderacao
+10. Nunca invente itens ou precos que nao estejam no cardapio
 
-FORMATO DE CONFIRMAÇÃO DO PEDIDO:
-✅ *PEDIDO CONFIRMADO*
-[lista dos itens com preços]
-💰 *Total: R$ XX,00*
-📍 [retirada/delivery + endereço]
-💳 *Pagamento:* PIX ${PIX}
+FORMATO DE CONFIRMACAO DO PEDIDO:
+PEDIDO CONFIRMADO
+[lista dos itens com precos]
+Total: R$ XX,00
+[retirada/delivery + endereco]
+Pagamento: PIX ${PIX}
 
-Responda SEMPRE em português brasileiro.`;
+Responda SEMPRE em portugues brasileiro.`;
 }
 
 async function getHistory(phone) {
-  const { data } = await supabase
-    .from("conversas")
-    .select("mensagens")
-    .eq("telefone", phone)
-    .single();
-  return data?.mensagens || [];
+  try {
+    const { data } = await supabase
+      .from("conversas")
+      .select("mensagens")
+      .eq("telefone", phone)
+      .single();
+    return data?.mensagens || [];
+  } catch {
+    return [];
+  }
 }
 
 async function saveHistory(phone, messages) {
-  const recent = messages.slice(-20);
-  await supabase.from("conversas").upsert(
-    { telefone: phone, mensagens: recent, atualizado_em: new Date() },
-    { onConflict: "telefone" }
-  );
+  try {
+    const recent = messages.slice(-20);
+    await supabase.from("conversas").upsert(
+      { telefone: phone, mensagens: recent, atualizado_em: new Date() },
+      { onConflict: "telefone" }
+    );
+  } catch (e) {
+    console.error("Erro ao salvar historico:", e.message);
+  }
 }
 
 async function saveOrder(phone, message, response) {
-  if (response.includes("PEDIDO CONFIRMADO")) {
-    await supabase.from("pedidos").insert({
-      telefone: phone,
-      mensagem_cliente: message,
-      resposta_agente: response,
-      criado_em: new Date(),
-    });
+  try {
+    if (response.includes("PEDIDO CONFIRMADO")) {
+      await supabase.from("pedidos").insert({
+        telefone: phone,
+        mensagem_cliente: message,
+        resposta_agente: response,
+        criado_em: new Date(),
+      });
+    }
+  } catch (e) {
+    console.error("Erro ao salvar pedido:", e.message);
   }
 }
 
 async function callGroq(history, userMessage) {
   const messages = [
     { role: "system", content: buildSystemPrompt() },
-    ...history.map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
+    ...history.map((m) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: m.content,
+    })),
     { role: "user", content: userMessage },
   ];
 
@@ -107,7 +122,7 @@ async function callGroq(history, userMessage) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
     },
     body: JSON.stringify({
       model: "llama-3.1-8b-instant",
@@ -122,18 +137,49 @@ async function callGroq(history, userMessage) {
 }
 
 async function sendWhatsApp(phone, message) {
-  const response = await fetch(
-    `${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: process.env.EVOLUTION_API_KEY,
-      },
-      body: JSON.stringify({ number: phone, textMessage: { text: message } }),
-    }
-  );
-  return response.ok;
+  try {
+    const response = await fetch(
+      `${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: process.env.EVOLUTION_API_KEY,
+        },
+        body: JSON.stringify({
+          number: phone,
+          textMessage: { text: message },
+        }),
+      }
+    );
+    const result = await response.json();
+    console.log("Resultado envio WhatsApp:", JSON.stringify(result));
+    return response.ok;
+  } catch (e) {
+    console.error("Erro ao enviar WhatsApp:", e.message);
+    return false;
+  }
+}
+
+function extractPhone(body) {
+  if (!body?.data?.key?.remoteJid) return null;
+  if (body.data.key.fromMe) return null;
+
+  const remoteJid = body.data.key.remoteJid;
+
+  // Se vier @lid, tenta pegar o numero real
+  if (remoteJid.includes("@lid")) {
+    // remoteJidAlt tem o numero real em versoes mais novas
+    const alt = body.data.key.remoteJidAlt;
+    if (alt) return alt.replace("@s.whatsapp.net", "");
+    // sender tambem pode ter o numero real
+    const sender = body.data.sender;
+    if (sender) return sender.replace("@s.whatsapp.net", "").replace("@lid", "");
+    // Fallback: usa o proprio @lid (a Evolution API v1.8.2 aceita enviar para @lid)
+    return remoteJid;
+  }
+
+  return remoteJid.replace("@s.whatsapp.net", "");
 }
 
 export default async function handler(req, res) {
@@ -151,7 +197,7 @@ export default async function handler(req, res) {
     let phone, message;
 
     if (body?.data?.key?.remoteJid) {
-      phone = body.data.key.remoteJid.replace("@s.whatsapp.net", "");
+      phone = extractPhone(body);
       message = body.data.message?.conversation || body.data.message?.extendedTextMessage?.text;
     } else if (body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
       const msg = body.entry[0].changes[0].value.messages[0];
@@ -162,7 +208,7 @@ export default async function handler(req, res) {
     if (!phone || !message) return res.status(200).json({ ok: true });
     if (phone.includes("@g.us")) return res.status(200).json({ ok: true });
 
-    console.log(`📱 Mensagem de ${phone}: ${message}`);
+    console.log(`Mensagem de ${phone}: ${message}`);
 
     const history = await getHistory(phone);
     const reply = await callGroq(history, message);
@@ -172,11 +218,12 @@ export default async function handler(req, res) {
       { role: "user", content: message },
       { role: "assistant", content: reply },
     ];
+
     await saveHistory(phone, updatedHistory);
     await saveOrder(phone, message, reply);
     await sendWhatsApp(phone, reply);
 
-    console.log(`✅ Resposta enviada para ${phone}`);
+    console.log(`Resposta enviada para ${phone}`);
     return res.status(200).json({ ok: true });
   } catch (error) {
     console.error("Erro no webhook:", error);
