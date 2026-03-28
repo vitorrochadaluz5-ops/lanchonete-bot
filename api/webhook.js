@@ -130,7 +130,7 @@ async function sendWhatsApp(phone, message) {
         "Content-Type": "application/json",
         apikey: process.env.EVOLUTION_API_KEY,
       },
-      body: JSON.stringify({ number: phone, text: message }),
+      body: JSON.stringify({ number: phone, textMessage: { text: message } }),
     }
   );
   return response.ok;
