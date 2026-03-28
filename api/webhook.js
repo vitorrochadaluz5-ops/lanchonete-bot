@@ -1,23 +1,10 @@
-
-// =============================================================
-// AGENTE ATENDENTE DE LANCHONETE — WhatsApp + Gemini (GRÁTIS)
-// =============================================================
-// Stack: Vercel (grátis) + Gemini Flash-Lite (grátis) + Supabase (grátis)
-// Custo estimado: R$ 0/mês para até ~500 pedidos/mês
-// =============================================================
-
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
 );
 
-// =============================================================
-// CARDÁPIO — edite aqui com seus produtos e preços
-// =============================================================
 const CARDAPIO = `
 🍔 LANCHES
 - X-Burguer .............. R$ 18,00
@@ -46,9 +33,6 @@ const HORARIO = process.env.HORARIO || "Seg-Sex: 11h–22h | Sáb-Dom: 11h–23h
 const ENDERECO = process.env.ENDERECO || "Rua das Flores, 123 — Centro";
 const PIX = process.env.PIX_CHAVE || "lanchonete@email.com";
 
-// =============================================================
-// PROMPT DO AGENTE
-// =============================================================
 function buildSystemPrompt() {
   return `Você é um atendente simpático e eficiente da ${NOME_LANCHONETE}.
 Seu trabalho é atender clientes pelo WhatsApp, anotar pedidos e confirmar tudo com clareza.
@@ -63,7 +47,7 @@ CARDÁPIO COMPLETO:
 ${CARDAPIO}
 
 REGRAS DE ATENDIMENTO:
-1. Cumprimente o cliente pelo nome se souber, com energia e simpatia
+1. Cumprimente o cliente com energia e simpatia
 2. Apresente o cardápio quando o cliente pedir ou na primeira mensagem
 3. Anote os itens do pedido com atenção
 4. Ao finalizar, SEMPRE confirme o pedido completo com os itens e o total
@@ -75,7 +59,6 @@ REGRAS DE ATENDIMENTO:
 10. Nunca invente itens ou preços que não estejam no cardápio
 
 FORMATO DE CONFIRMAÇÃO DO PEDIDO:
-Ao confirmar, use sempre este formato:
 ✅ *PEDIDO CONFIRMADO*
 [lista dos itens com preços]
 💰 *Total: R$ XX,00*
@@ -85,9 +68,6 @@ Ao confirmar, use sempre este formato:
 Responda SEMPRE em português brasileiro.`;
 }
 
-// =============================================================
-// HISTÓRICO DE CONVERSA (Supabase)
-// =============================================================
 async function getHistory(phone) {
   const { data } = await supabase
     .from("conversas")
@@ -98,7 +78,6 @@ async function getHistory(phone) {
 }
 
 async function saveHistory(phone, messages) {
-  // Mantém apenas as últimas 20 mensagens para economizar tokens
   const recent = messages.slice(-20);
   await supabase.from("conversas").upsert(
     { telefone: phone, mensagens: recent, atualizado_em: new Date() },
@@ -107,7 +86,6 @@ async function saveHistory(phone, messages) {
 }
 
 async function saveOrder(phone, message, response) {
-  // Detecta se há confirmação de pedido na resposta
   if (response.includes("PEDIDO CONFIRMADO")) {
     await supabase.from("pedidos").insert({
       telefone: phone,
@@ -118,70 +96,51 @@ async function saveOrder(phone, message, response) {
   }
 }
 
-// =============================================================
-// CHAMADA AO GEMINI
-// =============================================================
-async function callGemini(history, userMessage) {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash", // modelo mais barato — grátis até certo limite
-    systemInstruction: buildSystemPrompt(),
-    generationConfig: {
-      maxOutputTokens: 500, // limita resposta para economizar tokens
-      temperature: 0.7,
+async function callGroq(history, userMessage) {
+  const messages = [
+    { role: "system", content: buildSystemPrompt() },
+    ...history.map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
+    { role: "user", content: userMessage },
+  ];
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
     },
+    body: JSON.stringify({
+      model: "llama-3.1-8b-instant",
+      messages,
+      max_tokens: 500,
+      temperature: 0.7,
+    }),
   });
 
-  // Converte histórico para o formato do Gemini
-  const chat = model.startChat({
-    history: history.map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    })),
-  });
-
-  const result = await chat.sendMessage(userMessage);
-  return result.response.text();
+  const data = await response.json();
+  return data.choices[0].message.content;
 }
 
-// =============================================================
-// ENVIO DE MENSAGEM VIA EVOLUTION API (WhatsApp)
-// =============================================================
 async function sendWhatsApp(phone, message) {
-  const evolutionUrl = process.env.EVOLUTION_API_URL;
-  const evolutionKey = process.env.EVOLUTION_API_KEY;
-  const instanceName = process.env.EVOLUTION_INSTANCE;
-
   const response = await fetch(
-    `${evolutionUrl}/message/sendText/${instanceName}`,
+    `${process.env.EVOLUTION_API_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE}`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: evolutionKey,
+        apikey: process.env.EVOLUTION_API_KEY,
       },
-      body: JSON.stringify({
-        number: phone,
-        text: message,
-      }),
+      body: JSON.stringify({ number: phone, text: message }),
     }
   );
-
   return response.ok;
 }
 
-// =============================================================
-// HANDLER PRINCIPAL DO WEBHOOK
-// =============================================================
 export default async function handler(req, res) {
-  // Verificação do webhook (Evolution API / Meta)
   if (req.method === "GET") {
     const verify_token = process.env.WEBHOOK_VERIFY_TOKEN || "lanchonete123";
-    const mode = req.query["hub.mode"];
-    const token = req.query["hub.verify_token"];
-    const challenge = req.query["hub.challenge"];
-    if (mode === "subscribe" && token === verify_token) {
-      return res.status(200).send(challenge);
-    }
+    const { "hub.mode": mode, "hub.verify_token": token, "hub.challenge": challenge } = req.query;
+    if (mode === "subscribe" && token === verify_token) return res.status(200).send(challenge);
     return res.status(403).end();
   }
 
@@ -189,46 +148,32 @@ export default async function handler(req, res) {
 
   try {
     const body = req.body;
-
-    // Suporte a Evolution API e Meta Webhooks
     let phone, message;
 
     if (body?.data?.key?.remoteJid) {
-      // Evolution API format
       phone = body.data.key.remoteJid.replace("@s.whatsapp.net", "");
       message = body.data.message?.conversation || body.data.message?.extendedTextMessage?.text;
     } else if (body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
-      // Meta Webhook format
       const msg = body.entry[0].changes[0].value.messages[0];
       phone = msg.from;
       message = msg.text?.body;
     }
 
     if (!phone || !message) return res.status(200).json({ ok: true });
-
-    // Ignora mensagens de grupos
     if (phone.includes("@g.us")) return res.status(200).json({ ok: true });
 
     console.log(`📱 Mensagem de ${phone}: ${message}`);
 
-    // Busca histórico da conversa
     const history = await getHistory(phone);
+    const reply = await callGroq(history, message);
 
-    // Chama o Gemini
-    const reply = await callGemini(history, message);
-
-    // Salva histórico atualizado
     const updatedHistory = [
       ...history,
       { role: "user", content: message },
       { role: "assistant", content: reply },
     ];
     await saveHistory(phone, updatedHistory);
-
-    // Salva pedido se foi confirmado
     await saveOrder(phone, message, reply);
-
-    // Envia resposta pelo WhatsApp
     await sendWhatsApp(phone, reply);
 
     console.log(`✅ Resposta enviada para ${phone}`);
